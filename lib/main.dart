@@ -19,6 +19,20 @@ class MyApp extends StatelessWidget {
   }
 }
 
+// Enum для категорий расходов с иконками
+enum ExpenseCategory {
+  entertainment('Развлечения', Icons.movie),
+  shopping('Магазин', Icons.shopping_cart),
+  clothes('Одежда', Icons.checkroom),
+  sports('Спорт', Icons.sports_soccer),
+  education('Образование', Icons.school);
+
+  final String name;
+  final IconData icon;
+
+  const ExpenseCategory(this.name, this.icon);
+}
+
 class Transaction {
   final String type;
   final double amount;
@@ -26,6 +40,7 @@ class Transaction {
   final String description;
   final String? target;
   final String currency;
+  final ExpenseCategory? category;
 
   Transaction({
     required this.type,
@@ -34,6 +49,7 @@ class Transaction {
     required this.description,
     required this.currency,
     this.target,
+    this.category,
   });
 
   Map<String, dynamic> toJson() => {
@@ -43,6 +59,7 @@ class Transaction {
     'description': description,
     'target': target,
     'currency': currency,
+    'category': category?.name,
   };
 
   factory Transaction.fromJson(Map<String, dynamic> json) => Transaction(
@@ -52,6 +69,11 @@ class Transaction {
     description: json['description'],
     target: json['target'],
     currency: json['currency'] ?? 'BYN',
+    category: json['category'] != null
+        ? ExpenseCategory.values.firstWhere(
+            (e) => e.name == json['category'],
+        orElse: () => ExpenseCategory.entertainment)
+        : null,
   );
 }
 
@@ -104,6 +126,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   double _usdBalance = 0;
   String? _selectedBank;
   String? _selectedCurrency;
+  ExpenseCategory? _selectedCategory;
   late final AnimationController _progressController;
   final Map<String, Animation<double>> _bankAnimations = {};
   final double _exchangeRate = 3.0;
@@ -213,6 +236,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   void _showTransactionDialog({String? type, bool forBank = false, PiggyBank? bankToDelete}) {
+    _selectedCategory = null;
+
     showDialog(
       context: context,
       barrierColor: Colors.black54,
@@ -241,9 +266,40 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
               TextField(
                 controller: _descController,
                 decoration: InputDecoration(
-                  labelText: forBank ? 'Комментарий' : (type == 'income' ? 'Комментарий' : 'Причина расхода'),
+                  labelText: forBank
+                      ? 'Комментарий'
+                      : (type == 'income'
+                      ? 'Комментарий'
+                      : 'Комментарий (необязательно)'),
                 ),
               ),
+              if (type == 'expense') ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<ExpenseCategory>(
+                  value: _selectedCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'Категория',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: ExpenseCategory.values.map((category) {
+                    return DropdownMenuItem<ExpenseCategory>(
+                      value: category,
+                      child: Row(
+                        children: [
+                          Icon(category.icon, size: 20),
+                          const SizedBox(width: 8),
+                          Text(category.name),
+                        ],
+                      ),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedCategory = value;
+                    });
+                  },
+                ),
+              ],
             ],
             if (forBank && _piggyBanks.isNotEmpty && bankToDelete == null)
               DropdownButton<String>(
@@ -369,17 +425,16 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       return;
     }
 
-    if (type == 'expense' && description.isEmpty) {
-      _showError('Укажите причину расхода');
-      return;
-    }
-
     final newTransaction = Transaction(
       type: type,
       amount: amount,
       date: DateTime.now(),
-      description: description,
+      description: description.isNotEmpty ? description :
+      (type == 'expense' && _selectedCategory != null
+          ? _selectedCategory!.name
+          : 'Без описания'),
       currency: currency,
+      category: type == 'expense' ? _selectedCategory : null,
     );
 
     setState(() {
@@ -389,6 +444,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
       _amountController.clear();
       _descController.clear();
       _selectedCurrency = null;
+      _selectedCategory = null;
     });
   }
 
@@ -590,6 +646,20 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                   style: const TextStyle(fontSize: 12),
                 ),
               ),
+            if (transaction.category != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    Icon(transaction.category!.icon, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      transaction.category!.name,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
           ],
         ),
         actions: [
@@ -723,16 +793,24 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(12),
         ),
         child: ListTile(
-          leading: Container(
-            width: 4,
-            height: 40,
-            decoration: BoxDecoration(
-              color: leadingColor,
-              borderRadius: BorderRadius.circular(2),
-            ),
+          leading: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              if (t.category != null)
+                Icon(t.category!.icon, color: leadingColor),
+              if (t.category == null)
+                Container(
+                  width: 4,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: leadingColor,
+                    borderRadius: BorderRadius.circular(2),
+                  ),
+                ),
+            ],
           ),
           title: Text(t.description),
-          subtitle: Text('${t.date.day}.${t.date.month}.${t.date.year} - $typeText'),
+          subtitle: Text('${t.date.day}.${t.date.month}.${t.date.year} - $typeText${t.category != null ? ' (${t.category!.name})' : ''}'),
           trailing: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
