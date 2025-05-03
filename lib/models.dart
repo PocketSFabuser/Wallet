@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 // Enum для категорий расходов с иконками
 enum ExpenseCategory {
   entertainment('Развлечения', Icons.movie),
-  shopping('Магазин', Icons.shopping_cart),
+  shopping('Еда', Icons.shopping_cart),
   clothes('Одежда', Icons.checkroom),
   sports('Спорт', Icons.sports_soccer),
   education('Образование', Icons.school);
