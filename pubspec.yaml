@@ -1,4 +1,4 @@
-name: Wallet
+name: my_wallet
 description: "Simple wallet app for finance manage"
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
@@ -28,9 +28,12 @@ environment:
 # the latest version available on pub.dev. To see which dependencies have newer
 # versions available, run `flutter pub outdated`.
 dependencies:
-  shared_preferences: ^2.5.3
   flutter:
     sdk: flutter
+  shared_preferences: ^2.2.2
+  intl: ^0.18.1
+  collection: ^1.17.1
+  fl_chart: ^0.65.0  # или новее
 
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
