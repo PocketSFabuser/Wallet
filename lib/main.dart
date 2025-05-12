@@ -85,6 +85,110 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     );
     _loadData();
   }
+  @override
+  void _editTransaction(int index) {
+    final transaction = _transactions[index];
+    _amountController.text = transaction.amount.toString();
+    _descController.text = transaction.description;
+    _selectedCurrency = transaction.currency;
+    _selectedCategory = transaction.category;
+
+    showDialog(
+      context: context,
+      barrierColor: Colors.black54,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text('Редактировать транзакцию'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _amountController,
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                labelText: 'Сумма',
+                suffix: _buildCurrencyDropdown(),
+              ),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _descController,
+              decoration: InputDecoration(
+                labelText: 'Описание',
+              ),
+            ),
+            if (transaction.type == 'expense') ...[
+              const SizedBox(height: 16),
+              DropdownButtonFormField<ExpenseCategory>(
+                value: _selectedCategory,
+                decoration: const InputDecoration(
+                  labelText: 'Категория',
+                  border: OutlineInputBorder(),
+                ),
+                items: ExpenseCategory.values.map((category) {
+                  return DropdownMenuItem<ExpenseCategory>(
+                    value: category,
+                    child: Row(
+                      children: [
+                        Icon(category.icon, size: 20),
+                        const SizedBox(width: 8),
+                        Text(category.name),
+                      ],
+                    ),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedCategory = value;
+                  });
+                },
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
+          ),
+          TextButton(
+            onPressed: () {
+              final amount = double.tryParse(_amountController.text);
+              final description = _descController.text.trim();
+              final currency = _selectedCurrency ?? 'BYN';
+
+              if (amount == null || amount <= 0) {
+                _showError('Введите корректную сумму');
+                return;
+              }
+
+              setState(() {
+                _transactions[index] = Transaction(
+                  type: transaction.type,
+                  amount: amount,
+                  date: transaction.date,
+                  description: description.isNotEmpty ? description : 'Без описания',
+                  currency: currency,
+                  category: transaction.type == 'expense' ? _selectedCategory : null,
+                  target: transaction.target,
+                );
+                _calculateBalance();
+                _saveData();
+                _amountController.clear();
+                _descController.clear();
+                _selectedCurrency = null;
+                _selectedCategory = null;
+              });
+              Navigator.pop(ctx);
+            },
+            child: const Text('Сохранить'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   void dispose() {
@@ -752,52 +856,55 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         _showDeleteTransactionDialog(index);
         return false;
       },
-      child: Card(
-        color: const Color(0xFF2A2A2A),
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        child: ListTile(
-          leading: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (t.category != null)
-                Icon(t.category!.icon, color: leadingColor),
-              if (t.category == null)
-                Container(
-                  width: 4,
-                  height: 40,
-                  decoration: BoxDecoration(
+      child: GestureDetector(
+        onTap: () => _editTransaction(index),
+        child: Card(
+          color: const Color(0xFF2A2A2A),
+          margin: const EdgeInsets.symmetric(vertical: 8),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: ListTile(
+            leading: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (t.category != null)
+                  Icon(t.category!.icon, color: leadingColor),
+                if (t.category == null)
+                  Container(
+                    width: 4,
+                    height: 40,
+                    decoration: BoxDecoration(
+                      color: leadingColor,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+              ],
+            ),
+            title: Text(t.description),
+            subtitle: Text(
+                '${t.date.day}.${t.date.month}.${t.date.year} - $typeText${t
+                    .category != null ? ' (${t.category!.name})' : ''}'),
+            trailing: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Text(
+                  '$amountPrefix${t.amount.toStringAsFixed(2)} ${t.currency}',
+                  style: TextStyle(
                     color: leadingColor,
-                    borderRadius: BorderRadius.circular(2),
+                    fontSize: 16,
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-            ],
-          ),
-          title: Text(t.description),
-          subtitle: Text(
-              '${t.date.day}.${t.date.month}.${t.date.year} - $typeText${t
-                  .category != null ? ' (${t.category!.name})' : ''}'),
-          trailing: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '$amountPrefix${t.amount.toStringAsFixed(2)} ${t.currency}',
-                style: TextStyle(
-                  color: leadingColor,
-                  fontSize: 16,
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              if (t.currency != 'BYN')
-                Text(
-                  '≈ ${_convertToBYN(t.amount, t.currency).toStringAsFixed(
-                      2)} BYN',
-                  style: const TextStyle(fontSize: 12),
-                ),
-            ],
+                if (t.currency != 'BYN')
+                  Text(
+                    '≈ ${_convertToBYN(t.amount, t.currency).toStringAsFixed(
+                        2)} BYN',
+                    style: const TextStyle(fontSize: 12),
+                  ),
+              ],
+            ),
           ),
         ),
       ),
