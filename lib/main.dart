@@ -1043,14 +1043,12 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                       ..._transactions.reversed.map((t) =>
                           _buildTransactionItem(t)),
                       const SizedBox(height: 80),
-                      // Отступ для кнопки статистики
                     ],
                   ),
                 ],
               ),
             ),
           ),
-          // Закрепленная кнопка статистики
           Positioned(
             bottom: 16,
             left: 16,
@@ -1060,8 +1058,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (context) =>
-                        StatsPage(transactions: _transactions),
+                    builder: (context) => StatsPage(transactions: _transactions),
                   ),
                 );
               },
@@ -1077,23 +1074,27 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
           ),
         ],
       ),
-      floatingActionButton: Column(
-        mainAxisAlignment: MainAxisAlignment.end,
-        children: [
-          FloatingActionButton(
-            heroTag: 'income',
-            onPressed: () => _showTransactionDialog(type: 'income'),
-            backgroundColor: Colors.green,
-            child: const Icon(Icons.add),
-          ),
-          const SizedBox(height: 16),
-          FloatingActionButton(
-            heroTag: 'expense',
-            onPressed: () => _showTransactionDialog(type: 'expense'),
-            backgroundColor: Colors.red,
-            child: const Icon(Icons.remove),
-          ),
-        ],
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 50), // Отступ снизу для кнопки статистики
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            FloatingActionButton(
+              heroTag: 'income',
+              onPressed: () => _showTransactionDialog(type: 'income'),
+              backgroundColor: Colors.green,
+              child: const Icon(Icons.add),
+            ),
+            const SizedBox(height: 16),
+            FloatingActionButton(
+              heroTag: 'expense',
+              onPressed: () => _showTransactionDialog(type: 'expense'),
+              backgroundColor: Colors.red,
+              child: const Icon(Icons.remove),
+            ),
+          ],
+        ),
       ),
     );
   }
