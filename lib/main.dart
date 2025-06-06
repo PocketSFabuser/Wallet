@@ -22,19 +22,20 @@ class MyApp extends StatelessWidget {
   }
 }
 
-
 class PiggyBank {
   final String name;
   final double currentAmount;
   final double targetAmount;
   final Color color;
+  final DateTime createdAt;
 
   PiggyBank({
     required this.name,
     required this.currentAmount,
     required this.targetAmount,
     this.color = Colors.blue,
-  });
+    DateTime? createdAt,
+  }) : createdAt = createdAt ?? DateTime.now();
 
   double get progress => currentAmount / targetAmount;
 
@@ -43,6 +44,7 @@ class PiggyBank {
     'currentAmount': currentAmount,
     'targetAmount': targetAmount,
     'color': color.value,
+    'createdAt': createdAt.toIso8601String(),
   };
 
   factory PiggyBank.fromJson(Map<String, dynamic> json) => PiggyBank(
@@ -50,6 +52,7 @@ class PiggyBank {
     currentAmount: json['currentAmount'],
     targetAmount: json['targetAmount'],
     color: Color(json['color']),
+    createdAt: DateTime.parse(json['createdAt']),
   );
 }
 
@@ -76,6 +79,15 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   late final AnimationController _progressController;
   final Map<String, Animation<double>> _bankAnimations = {};
   final double _exchangeRate = 3.0;
+  DateTime? _loadTime;
+  final Map<String, AnimationController> _bankAppearControllers = {};
+  final Map<String, Animation<double>> _bankAppearAnimations = {};
+  final Map<String, AnimationController> _transactionAppearControllers = {};
+  final Map<String, Animation<double>> _transactionAppearAnimations = {};
+  final Map<String, AnimationController> _bankRemoveControllers = {};
+  final Map<String, Animation<double>> _bankRemoveAnimations = {};
+  final Map<String, AnimationController> _transactionRemoveControllers = {};
+  final Map<String, Animation<double>> _transactionRemoveAnimations = {};
 
   @override
   void initState() {
@@ -86,7 +98,66 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     );
     _loadData();
   }
+
   @override
+  void dispose() {
+    _progressController.dispose();
+    for (var controller in _bankAppearControllers.values) {
+      controller.dispose();
+    }
+    for (var controller in _transactionAppearControllers.values) {
+      controller.dispose();
+    }
+    for (var controller in _bankRemoveControllers.values) {
+      controller.dispose();
+    }
+    for (var controller in _transactionRemoveControllers.values) {
+      controller.dispose();
+    }
+    _amountController.dispose();
+    _descController.dispose();
+    _bankNameController.dispose();
+    _bankTargetController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadData() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final transactionsJson = prefs.getStringList('transactions') ?? [];
+    setState(() {
+      _transactions = transactionsJson
+          .map((json) => Transaction.fromJson(jsonDecode(json)))
+          .toList();
+    });
+
+    final banksJson = prefs.getStringList('piggyBanks') ?? [];
+    setState(() {
+      _piggyBanks = banksJson
+          .map((json) => PiggyBank.fromJson(jsonDecode(json)))
+          .toList();
+
+      for (var bank in _piggyBanks) {
+        _bankAnimations[bank.name] = Tween<double>(
+          begin: 0,
+          end: bank.progress,
+        ).animate(
+          CurvedAnimation(
+            parent: _progressController,
+            curve: Curves.easeInOut,
+          ),
+        );
+      }
+    });
+
+    _calculateBalance();
+    _progressController.forward().then((_) {
+      setState(() {
+        _loadTime = DateTime.now();
+      });
+    });
+  }
+
   void _editTransaction(int index) {
     final transaction = _transactions[index];
     _amountController.text = transaction.amount.toString();
@@ -101,7 +172,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(16),
         ),
-        title: Text('Редактировать транзакцию'),
+        title: const Text('Редактировать транзакцию'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -116,7 +187,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             const SizedBox(height: 16),
             TextField(
               controller: _descController,
-              decoration: InputDecoration(
+              decoration: const InputDecoration(
                 labelText: 'Описание',
               ),
             ),
@@ -191,51 +262,8 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     );
   }
 
-  @override
-  void dispose() {
-    _progressController.dispose();
-    _amountController.dispose();
-    _descController.dispose();
-    _bankNameController.dispose();
-    _bankTargetController.dispose();
-    super.dispose();
-  }
-
   double _convertToBYN(double amount, String currency) {
     return currency == 'USD' ? amount * _exchangeRate : amount;
-  }
-
-  Future<void> _loadData() async {
-    final prefs = await SharedPreferences.getInstance();
-
-    final transactionsJson = prefs.getStringList('transactions') ?? [];
-    setState(() {
-      _transactions = transactionsJson
-          .map((json) => Transaction.fromJson(jsonDecode(json)))
-          .toList();
-    });
-
-    final banksJson = prefs.getStringList('piggyBanks') ?? [];
-    setState(() {
-      _piggyBanks = banksJson
-          .map((json) => PiggyBank.fromJson(jsonDecode(json)))
-          .toList();
-
-      for (var bank in _piggyBanks) {
-        _bankAnimations[bank.name] = Tween<double>(
-          begin: 0,
-          end: bank.progress,
-        ).animate(
-          CurvedAnimation(
-            parent: _progressController,
-            curve: Curves.easeInOut,
-          ),
-        );
-      }
-    });
-
-    _calculateBalance();
-    _progressController.forward();
   }
 
   void _calculateBalance() {
@@ -285,140 +313,136 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     );
   }
 
-  void _showTransactionDialog(
-      {String? type, bool forBank = false, PiggyBank? bankToDelete}) {
+  void _showTransactionDialog({
+    String? type,
+    bool forBank = false,
+    PiggyBank? bankToDelete,
+  }) {
     _selectedCategory = null;
 
     showDialog(
       context: context,
       barrierColor: Colors.black54,
-      builder: (ctx) =>
-          AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: Text(forBank
-                ? (bankToDelete != null
-                ? 'Удалить копилку?'
-                : 'Пополнить копилку')
-                : 'Добавить ${type == 'income' ? 'доход' : 'расход'}'),
-            content: bankToDelete != null
-                ? Text('Вы уверены, что хотите удалить копилку "${bankToDelete
-                .name}"?')
-                : Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (!forBank || _piggyBanks.isNotEmpty) ...[
-                  TextField(
-                    controller: _amountController,
-                    keyboardType: TextInputType.number,
-                    decoration: InputDecoration(
-                      labelText: 'Сумма',
-                      suffix: _buildCurrencyDropdown(),
-                    ),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: Text(forBank
+            ? (bankToDelete != null
+            ? 'Удалить копилку?'
+            : 'Пополнить копилку')
+            : 'Добавить ${type == 'income' ? 'доход' : 'расход'}'),
+        content: bankToDelete != null
+            ? Text('Вы уверены, что хотите удалить копилку "${bankToDelete.name}"?')
+            : Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (!forBank || _piggyBanks.isNotEmpty) ...[
+              TextField(
+                controller: _amountController,
+                keyboardType: TextInputType.number,
+                decoration: InputDecoration(
+                  labelText: 'Сумма',
+                  suffix: _buildCurrencyDropdown(),
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: _descController,
+                decoration: InputDecoration(
+                  labelText: forBank
+                      ? 'Комментарий'
+                      : (type == 'income'
+                      ? 'Комментарий'
+                      : 'Комментарий (необязательно)'),
+                ),
+              ),
+              if (type == 'expense') ...[
+                const SizedBox(height: 16),
+                DropdownButtonFormField<ExpenseCategory>(
+                  value: _selectedCategory,
+                  decoration: const InputDecoration(
+                    labelText: 'Категория',
+                    border: OutlineInputBorder(),
                   ),
-                  const SizedBox(height: 16),
-                  TextField(
-                    controller: _descController,
-                    decoration: InputDecoration(
-                      labelText: forBank
-                          ? 'Комментарий'
-                          : (type == 'income'
-                          ? 'Комментарий'
-                          : 'Комментарий (необязательно)'),
-                    ),
-                  ),
-                  if (type == 'expense') ...[
-                    const SizedBox(height: 16),
-                    DropdownButtonFormField<ExpenseCategory>(
-                      value: _selectedCategory,
-                      decoration: const InputDecoration(
-                        labelText: 'Категория',
-                        border: OutlineInputBorder(),
+                  items: ExpenseCategory.values.map((category) {
+                    return DropdownMenuItem<ExpenseCategory>(
+                      value: category,
+                      child: Row(
+                        children: [
+                          Icon(category.icon, size: 20),
+                          const SizedBox(width: 8),
+                          Text(category.name),
+                        ],
                       ),
-                      items: ExpenseCategory.values.map((category) {
-                        return DropdownMenuItem<ExpenseCategory>(
-                          value: category,
-                          child: Row(
-                            children: [
-                              Icon(category.icon, size: 20),
-                              const SizedBox(width: 8),
-                              Text(category.name),
-                            ],
-                          ),
-                        );
-                      }).toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedCategory = value;
-                        });
-                      },
-                    ),
-                  ],
-                ],
-                if (forBank && _piggyBanks.isNotEmpty && bankToDelete == null)
-                  DropdownButton<String>(
-                    value: _selectedBank,
-                    hint: const Text('Выберите копилку'),
-                    items: _piggyBanks.map((bank) {
-                      return DropdownMenuItem<String>(
-                        value: bank.name,
-                        child: Text(bank.name),
-                      );
-                    }).toList(),
-                    onChanged: (value) {
-                      setState(() {
-                        _selectedBank = value;
-                      });
-                    },
-                  ),
-              ],
-            ),
-            actions: [
-              if (bankToDelete != null) ...[
-                TextButton(
-                  onPressed: () => Navigator.pop(ctx),
-                  child: const Text('Отмена'),
-                ),
-                TextButton(
-                  onPressed: () {
-                    _deletePiggyBank(bankToDelete);
-                    Navigator.pop(ctx);
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setState(() {
+                      _selectedCategory = value;
+                    });
                   },
-                  child: const Text(
-                      'Удалить', style: TextStyle(color: Colors.red)),
                 ),
-              ] else
-                ...[
-                  if (forBank && _selectedBank != null)
-                    TextButton(
-                      onPressed: () {
-                        final bank = _piggyBanks.firstWhere((b) =>
-                        b.name == _selectedBank);
-                        _showTransactionDialog(
-                            forBank: true, bankToDelete: bank);
-                      },
-                      child: const Text(
-                          'Удалить', style: TextStyle(color: Colors.red)),
-                    ),
-                  TextButton(
-                    onPressed: () => Navigator.pop(ctx),
-                    child: const Text('Отмена'),
-                  ),
-                  TextButton(
-                    onPressed: () {
-                      if (forBank) {
-                        _addToBank();
-                      } else if (type != null) {
-                        _addTransaction(type);
-                      }
-                      Navigator.pop(ctx);
-                    },
-                    child: const Text('Добавить'),
-                  ),
-                ],
+              ],
             ],
-          ),
+            if (forBank && _piggyBanks.isNotEmpty && bankToDelete == null)
+              DropdownButton<String>(
+                value: _selectedBank,
+                hint: const Text('Выберите копилку'),
+                items: _piggyBanks.map((bank) {
+                  return DropdownMenuItem<String>(
+                    value: bank.name,
+                    child: Text(bank.name),
+                  );
+                }).toList(),
+                onChanged: (value) {
+                  setState(() {
+                    _selectedBank = value;
+                  });
+                },
+              ),
+          ],
+        ),
+        actions: [
+          if (bankToDelete != null) ...[
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () {
+                _deletePiggyBank(bankToDelete);
+                Navigator.pop(ctx);
+              },
+              child: const Text('Удалить', style: TextStyle(color: Colors.red)),
+            ),
+          ] else ...[
+            if (forBank && _selectedBank != null)
+              TextButton(
+                onPressed: () {
+                  final bank = _piggyBanks.firstWhere((b) => b.name == _selectedBank);
+                  _showTransactionDialog(forBank: true, bankToDelete: bank);
+                },
+                child: const Text('Удалить', style: TextStyle(color: Colors.red)),
+              ),
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text('Отмена'),
+            ),
+            TextButton(
+              onPressed: () {
+                if (forBank) {
+                  _addToBank();
+                } else if (type != null) {
+                  _addTransaction(type);
+                }
+                Navigator.pop(ctx);
+              },
+              child: const Text('Добавить'),
+            ),
+          ],
+        ],
+      ),
     );
   }
 
@@ -426,54 +450,52 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     showDialog(
       context: context,
       barrierColor: Colors.black54,
-      builder: (ctx) =>
-          AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
-            ),
-            title: const Text('Новая копилка'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                TextField(
-                  controller: _bankNameController,
-                  decoration: const InputDecoration(
-                    labelText: 'Название копилки',
-                  ),
-                ),
-                const SizedBox(height: 16),
-                TextField(
-                  controller: _bankTargetController,
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Целевая сумма',
-                  ),
-                ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Отмена'),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Text('Новая копилка'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            TextField(
+              controller: _bankNameController,
+              decoration: const InputDecoration(
+                labelText: 'Название копилки',
               ),
-              TextButton(
-                onPressed: () {
-                  final target = double.tryParse(_bankTargetController.text);
-                  if (_bankNameController.text.isNotEmpty && target != null &&
-                      target > 0) {
-                    _addPiggyBank(
-                      name: _bankNameController.text,
-                      targetAmount: target,
-                    );
-                    Navigator.pop(ctx);
-                    _bankNameController.clear();
-                    _bankTargetController.clear();
-                  }
-                },
-                child: const Text('Создать'),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _bankTargetController,
+              keyboardType: TextInputType.number,
+              decoration: const InputDecoration(
+                labelText: 'Целевая сумма',
               ),
-            ],
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
           ),
+          TextButton(
+            onPressed: () {
+              final target = double.tryParse(_bankTargetController.text);
+              if (_bankNameController.text.isNotEmpty && target != null && target > 0) {
+                _addPiggyBank(
+                  name: _bankNameController.text,
+                  targetAmount: target,
+                );
+                Navigator.pop(ctx);
+                _bankNameController.clear();
+                _bankTargetController.clear();
+              }
+            },
+            child: const Text('Создать'),
+          ),
+        ],
+      ),
     );
   }
 
@@ -488,19 +510,34 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     }
 
     final newTransaction = Transaction(
-        type: type,
-        amount: amount,
-        date: DateTime.now(),
-        description: description.isNotEmpty ? description :
-        (type == 'expense' && _selectedCategory != null
-            ? _selectedCategory!.name
-            : 'Без описания'),
-        currency: currency,
-        category: type == 'expense' ? _selectedCategory : null
+      type: type,
+      amount: amount,
+      date: DateTime.now(),
+      description: description.isNotEmpty
+          ? description
+          : (type == 'expense' && _selectedCategory != null
+          ? _selectedCategory!.name
+          : 'Без описания'),
+      currency: currency,
+      category: type == 'expense' ? _selectedCategory : null,
     );
 
     setState(() {
       _transactions.add(newTransaction);
+
+      final transactionKey = '${newTransaction.date.millisecondsSinceEpoch}_${newTransaction.description}';
+      final appearController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 400),
+      );
+      final appearAnimation = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: appearController, curve: Curves.easeInOut),
+      );
+
+      _transactionAppearControllers[transactionKey] = appearController;
+      _transactionAppearAnimations[transactionKey] = appearAnimation;
+      appearController.forward();
+
       _calculateBalance();
       _saveData();
       _amountController.clear();
@@ -531,8 +568,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
     final convertedAmount = currency == 'USD' ? amount * _exchangeRate : amount;
     final oldProgress = _piggyBanks[bankIndex].progress;
-    final newProgress = (_piggyBanks[bankIndex].currentAmount +
-        convertedAmount) /
+    final newProgress = (_piggyBanks[bankIndex].currentAmount + convertedAmount) /
         _piggyBanks[bankIndex].targetAmount;
 
     final newTransaction = Transaction(
@@ -563,6 +599,19 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         ),
       );
 
+      final transactionKey = '${newTransaction.date.millisecondsSinceEpoch}_${newTransaction.description}';
+      final appearController = AnimationController(
+        vsync: this,
+        duration: const Duration(milliseconds: 400),
+      );
+      final appearAnimation = Tween<double>(begin: 0, end: 1).animate(
+        CurvedAnimation(parent: appearController, curve: Curves.easeInOut),
+      );
+
+      _transactionAppearControllers[transactionKey] = appearController;
+      _transactionAppearAnimations[transactionKey] = appearAnimation;
+      appearController.forward();
+
       _progressController.reset();
       _progressController.forward();
 
@@ -575,13 +624,26 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
   }
 
   void _addPiggyBank({required String name, required double targetAmount}) {
+    final newBank = PiggyBank(
+      name: name,
+      currentAmount: 0,
+      targetAmount: targetAmount,
+      color: Colors.primaries[_piggyBanks.length % Colors.primaries.length],
+    );
+
+    final appearController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 500),
+    );
+    final appearAnimation = CurvedAnimation(
+      parent: appearController,
+      curve: Curves.easeOutBack,
+    );
+
     setState(() {
-      _piggyBanks.add(PiggyBank(
-        name: name,
-        currentAmount: 0,
-        targetAmount: targetAmount,
-        color: Colors.primaries[_piggyBanks.length % Colors.primaries.length],
-      ));
+      _piggyBanks.add(newBank);
+      _bankAppearControllers[name] = appearController;
+      _bankAppearAnimations[name] = appearAnimation;
 
       _bankAnimations[name] = Tween<double>(
         begin: 0,
@@ -593,79 +655,120 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         ),
       );
 
+      appearController.forward();
       _saveData();
     });
   }
 
-  void _deletePiggyBank(PiggyBank bank) {
+  Future<void> _deletePiggyBank(PiggyBank bank) async {
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    final animation = Tween<double>(begin: 1, end: 0).animate(
+      CurvedAnimation(parent: controller, curve: Curves.easeInOut),
+    );
+
     setState(() {
-      _piggyBanks.removeWhere((b) => b.name == bank.name);
-      _bankAnimations.remove(bank.name);
-
-      _transactions.removeWhere((t) => t.target == bank.name);
-      _calculateBalance();
-      _saveData();
+      _bankRemoveControllers[bank.name] = controller;
+      _bankRemoveAnimations[bank.name] = animation;
     });
-  }
 
-  void _deleteTransaction(int index) {
-    final transaction = _transactions[index];
+    await controller.forward();
 
-    if (transaction.target != null) {
-      final bankIndex = _piggyBanks.indexWhere((b) =>
-      b.name == transaction.target);
-      if (bankIndex != -1) {
-        final convertedAmount = transaction.currency == 'USD'
-            ? transaction.amount * _exchangeRate
-            : transaction.amount;
+    if (mounted) {
+      setState(() {
+        _piggyBanks.removeWhere((b) => b.name == bank.name);
+        _bankAnimations.remove(bank.name);
+        _bankAppearControllers.remove(bank.name)?.dispose();
+        _bankAppearAnimations.remove(bank.name);
+        _bankRemoveControllers.remove(bank.name)?.dispose();
+        _bankRemoveAnimations.remove(bank.name);
 
-        final oldProgress = _piggyBanks[bankIndex].progress;
-        final newProgress = (_piggyBanks[bankIndex].currentAmount -
-            convertedAmount) /
-            _piggyBanks[bankIndex].targetAmount;
-
-        _piggyBanks[bankIndex] = PiggyBank(
-          name: _piggyBanks[bankIndex].name,
-          currentAmount: _piggyBanks[bankIndex].currentAmount - convertedAmount,
-          targetAmount: _piggyBanks[bankIndex].targetAmount,
-          color: _piggyBanks[bankIndex].color,
-        );
-
-        _bankAnimations[transaction.target!] = Tween<double>(
-          begin: oldProgress,
-          end: newProgress,
-        ).animate(
-          CurvedAnimation(
-            parent: _progressController,
-            curve: Curves.easeInOut,
-          ),
-        );
-
-        _progressController.reset();
-        _progressController.forward();
-      }
+        _transactions.removeWhere((t) => t.target == bank.name);
+        _calculateBalance();
+        _saveData();
+      });
     }
+  }
+
+  Future<void> _deleteTransaction(int index) async {
+    final transaction = _transactions[index];
+    final transactionKey = '${transaction.date.millisecondsSinceEpoch}_${transaction.description}';
+
+    final controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 250),
+    );
+    final animation = Tween<double>(begin: 1, end: 0).animate(
+      CurvedAnimation(parent: controller, curve: Curves.easeInOut),
+    );
 
     setState(() {
-      _transactions.removeAt(index);
-      _calculateBalance();
-      _saveData();
+      _transactionRemoveControllers[transactionKey] = controller;
+      _transactionRemoveAnimations[transactionKey] = animation;
     });
+
+    await controller.forward();
+
+    if (mounted) {
+      setState(() {
+        if (transaction.target != null) {
+          final bankIndex = _piggyBanks.indexWhere((b) => b.name == transaction.target);
+          if (bankIndex != -1) {
+            final convertedAmount = transaction.currency == 'USD'
+                ? transaction.amount * _exchangeRate
+                : transaction.amount;
+
+            final oldProgress = _piggyBanks[bankIndex].progress;
+            final newProgress = (_piggyBanks[bankIndex].currentAmount - convertedAmount) /
+                _piggyBanks[bankIndex].targetAmount;
+
+            _piggyBanks[bankIndex] = PiggyBank(
+              name: _piggyBanks[bankIndex].name,
+              currentAmount: _piggyBanks[bankIndex].currentAmount - convertedAmount,
+              targetAmount: _piggyBanks[bankIndex].targetAmount,
+              color: _piggyBanks[bankIndex].color,
+            );
+
+            _bankAnimations[transaction.target!] = Tween<double>(
+              begin: oldProgress,
+              end: newProgress,
+            ).animate(
+              CurvedAnimation(
+                parent: _progressController,
+                curve: Curves.easeInOut,
+              ),
+            );
+
+            _progressController.reset();
+            _progressController.forward();
+          }
+        }
+
+        _transactions.removeAt(index);
+        _transactionAppearControllers.remove(transactionKey)?.dispose();
+        _transactionAppearAnimations.remove(transactionKey);
+        _transactionRemoveControllers.remove(transactionKey)?.dispose();
+        _transactionRemoveAnimations.remove(transactionKey);
+        _calculateBalance();
+        _saveData();
+      });
+    }
   }
 
   void _showError(String message) {
     showDialog(
       context: context,
-      builder: (ctx) =>
-          AlertDialog(
-            content: Text(message),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('OK'),
-              ),
-            ],
+      builder: (ctx) => AlertDialog(
+        content: Text(message),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('OK'),
           ),
+        ],
+      ),
     );
   }
 
@@ -674,92 +777,143 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
     showDialog(
       context: context,
       barrierColor: Colors.black54,
-      builder: (ctx) =>
-          AlertDialog(
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(16),
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+        ),
+        title: const Text('Удалить транзакцию?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              transaction.description,
+              style: const TextStyle(fontSize: 16),
             ),
-            title: const Text('Удалить транзакцию?'),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  transaction.description,
-                  style: const TextStyle(fontSize: 16),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  '${transaction.type == 'expense' ? '-' : '+'}${transaction
-                      .amount.toStringAsFixed(2)} ${transaction.currency}',
-                  style: TextStyle(
-                    color: transaction.type == 'income' ? Colors.green : Colors
-                        .red,
-                    fontSize: 16,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-                if (transaction.currency != 'BYN')
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      '≈ ${_convertToBYN(
-                          transaction.amount, transaction.currency)
-                          .toStringAsFixed(2)} BYN',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                if (transaction.target != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Text(
-                      'Копилка: ${transaction.target}',
-                      style: const TextStyle(fontSize: 12),
-                    ),
-                  ),
-                if (transaction.category != null)
-                  Padding(
-                    padding: const EdgeInsets.only(top: 4),
-                    child: Row(
-                      children: [
-                        Icon(transaction.category!.icon, size: 16),
-                        const SizedBox(width: 4),
-                        Text(
-                          transaction.category!.name,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                      ],
-                    ),
-                  ),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: const Text('Отмена'),
+            const SizedBox(height: 8),
+            Text(
+              '${transaction.type == 'expense' ? '-' : '+'}${transaction.amount.toStringAsFixed(2)} ${transaction.currency}',
+              style: TextStyle(
+                color: transaction.type == 'income' ? Colors.green : Colors.red,
+                fontSize: 16,
+                fontWeight: FontWeight.bold,
               ),
-              TextButton(
-                onPressed: () {
-                  _deleteTransaction(index);
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Транзакция удалена'),
-                      duration: Duration(seconds: 2),
-                    ),
-                  );
-                },
-                child: const Text(
-                  'Удалить',
-                  style: TextStyle(color: Colors.red),
+            ),
+            if (transaction.currency != 'BYN')
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  '≈ ${_convertToBYN(transaction.amount, transaction.currency).toStringAsFixed(2)} BYN',
+                  style: const TextStyle(fontSize: 12),
                 ),
               ),
-            ],
+            if (transaction.target != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Text(
+                  'Копилка: ${transaction.target}',
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            if (transaction.category != null)
+              Padding(
+                padding: const EdgeInsets.only(top: 4),
+                child: Row(
+                  children: [
+                    Icon(transaction.category!.icon, size: 16),
+                    const SizedBox(width: 4),
+                    Text(
+                      transaction.category!.name,
+                      style: const TextStyle(fontSize: 12),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Отмена'),
           ),
+          TextButton(
+            onPressed: () {
+              _deleteTransaction(index);
+              Navigator.pop(ctx);
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text('Транзакция удалена'),
+                  duration: Duration(seconds: 2),
+                ),
+              );
+            },
+            child: const Text(
+              'Удалить',
+              style: TextStyle(color: Colors.red),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
   Widget _buildPiggyBank(PiggyBank bank) {
+    final appearAnimation = _bankAppearAnimations[bank.name];
+    final removeAnimation = _bankRemoveAnimations[bank.name];
+
+    if (removeAnimation != null) {
+      return AnimatedBuilder(
+        animation: removeAnimation,
+        builder: (context, child) {
+          return Opacity(
+            opacity: removeAnimation.value,
+            child: Transform.scale(
+              scale: removeAnimation.value,
+              child: _buildPiggyBankContent(bank),
+            ),
+          );
+        },
+      );
+    }
+
+    if (appearAnimation != null) {
+      return AnimatedBuilder(
+        animation: appearAnimation,
+        builder: (context, child) {
+          return Transform.scale(
+            scale: appearAnimation.value,
+            child: Opacity(
+              opacity: appearAnimation.value,
+              child: _buildPiggyBankContent(bank),
+            ),
+          );
+        },
+      );
+    }
+
+    final shouldAnimate = _loadTime != null && bank.createdAt.isAfter(_loadTime!);
+    if (shouldAnimate) {
+      return ScaleTransition(
+        scale: CurvedAnimation(
+          parent: _bankAppearAnimations.putIfAbsent(bank.name, () {
+            final controller = AnimationController(
+              vsync: this,
+              duration: const Duration(milliseconds: 500),
+            );
+            _bankAppearControllers[bank.name] = controller;
+            controller.forward();
+            return controller;
+          }),
+          curve: Curves.easeOutBack,
+        ),
+        child: _buildPiggyBankContent(bank),
+      );
+    }
+
+    return _buildPiggyBankContent(bank);
+  }
+
+  Widget _buildPiggyBankContent(PiggyBank bank) {
     return GestureDetector(
       onTap: () {
         _selectedBank = bank.name;
@@ -781,8 +935,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                 child: AnimatedBuilder(
                   animation: _progressController,
                   builder: (context, child) {
-                    final animation = _bankAnimations[bank.name] ??
-                        AlwaysStoppedAnimation(0.0);
+                    final animation = _bankAnimations[bank.name] ?? AlwaysStoppedAnimation(0.0);
                     return CircularProgressIndicator(
                       value: animation.value,
                       backgroundColor: Colors.grey[800],
@@ -822,6 +975,55 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   Widget _buildTransactionItem(Transaction t) {
     final index = _transactions.indexOf(t);
+    final transactionKey = '${t.date.millisecondsSinceEpoch}_${t.description}';
+
+    final appearAnimation = _transactionAppearAnimations[transactionKey];
+    final removeAnimation = _transactionRemoveAnimations[transactionKey];
+
+    if (removeAnimation != null) {
+      return AnimatedBuilder(
+        animation: removeAnimation,
+        builder: (context, child) {
+          return Opacity(
+            opacity: removeAnimation.value,
+            child: Transform.translate(
+              offset: Offset((1 - removeAnimation.value) * 100, 0),
+              child: _buildTransactionItemContent(t, index),
+            ),
+          );
+        },
+      );
+    }
+
+    if (appearAnimation != null) {
+      return AnimatedBuilder(
+        animation: appearAnimation,
+        builder: (context, child) {
+          return Opacity(
+            opacity: appearAnimation.value,
+            child: Transform.translate(
+              offset: Offset(0, (1 - appearAnimation.value) * 20),
+              child: _buildTransactionItemContent(t, index),
+            ),
+          );
+        },
+      );
+    }
+
+    final shouldAnimate = _loadTime != null && t.date.isAfter(_loadTime!);
+    if (shouldAnimate) {
+      return AnimatedOpacity(
+        opacity: 1,
+        duration: const Duration(milliseconds: 400),
+        curve: Curves.easeInOut,
+        child: _buildTransactionItemContent(t, index),
+      );
+    }
+
+    return _buildTransactionItemContent(t, index);
+  }
+
+  Widget _buildTransactionItemContent(Transaction t, int index) {
     Color? leadingColor;
     String typeText = '';
     String amountPrefix = '';
@@ -884,8 +1086,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
             ),
             title: Text(t.description),
             subtitle: Text(
-                '${t.date.day}.${t.date.month}.${t.date.year} - $typeText${t
-                    .category != null ? ' (${t.category!.name})' : ''}'),
+                '${t.date.day}.${t.date.month}.${t.date.year} - $typeText${t.category != null ? ' (${t.category!.name})' : ''}'),
             trailing: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.end,
@@ -900,8 +1101,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                 ),
                 if (t.currency != 'BYN')
                   Text(
-                    '≈ ${_convertToBYN(t.amount, t.currency).toStringAsFixed(
-                        2)} BYN',
+                    '≈ ${_convertToBYN(t.amount, t.currency).toStringAsFixed(2)} BYN',
                     style: const TextStyle(fontSize: 12),
                   ),
               ],
@@ -914,10 +1114,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
 
   @override
   Widget build(BuildContext context) {
-    final statusBarHeight = MediaQuery
-        .of(context)
-        .padding
-        .top;
+    final statusBarHeight = MediaQuery.of(context).padding.top;
 
     return Scaffold(
       appBar: AppBar(
@@ -1055,8 +1252,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
                           style: TextStyle(fontSize: 20),
                         ),
                       ),
-                      ..._transactions.reversed.map((t) =>
-                          _buildTransactionItem(t)),
+                      ..._transactions.reversed.map((t) => _buildTransactionItem(t)),
                       const SizedBox(height: 80),
                     ],
                   ),
@@ -1090,7 +1286,7 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         ],
       ),
       floatingActionButton: Padding(
-        padding: const EdgeInsets.only(bottom: 50), // Отступ снизу для кнопки статистики
+        padding: const EdgeInsets.only(bottom: 50),
         child: Column(
           mainAxisAlignment: MainAxisAlignment.end,
           crossAxisAlignment: CrossAxisAlignment.end,
