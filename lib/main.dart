@@ -3,6 +3,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
 import 'stats_page.dart';
 import 'models.dart';
+import 'converter_page.dart';
 
 void main() => runApp(const MyApp());
 
@@ -919,6 +920,20 @@ class _MyHomePageState extends State<MyHomePage> with TickerProviderStateMixin {
         .top;
 
     return Scaffold(
+      appBar: AppBar(
+        title: const Text('Мой кошелёк'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.currency_exchange),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(builder: (context) => const ConverterPage()),
+              );
+            },
+          ),
+        ],
+      ),
       body: Stack(
         children: [
           Padding(
