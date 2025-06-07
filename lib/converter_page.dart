@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
 import 'dart:async';
+import 'package:flutter/services.dart' show rootBundle; // Добавлен импорт для работы с активами
 
 class ConverterPage extends StatefulWidget {
   const ConverterPage({super.key});
@@ -36,35 +37,7 @@ class _ConverterPageState extends State<ConverterPage> {
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-        setState(() {
-          // Обрабатываем все валюты из JSON
-          Map<String, dynamic> valutes = data['Valute'];
-          valutes.forEach((key, value) {
-            double nominal = value['Nominal']?.toDouble() ?? 1.0;
-            double val = value['Value']?.toDouble() ?? 0.0;
-            _exchangeRates[key] = val / nominal;
-          });
-
-          // Обновляем список доступных валют
-          _availableCurrencies = ['RUB']..addAll(_exchangeRates.keys);
-          _availableCurrencies = _availableCurrencies.toSet().toList();
-
-          // Убедимся, что выбранные валюты существуют
-          for (int i = 0; i < _selectedCurrencies.length; i++) {
-            if (!_exchangeRates.containsKey(_selectedCurrencies[i])) {
-              _selectedCurrencies[i] = 'RUB';
-            }
-          }
-
-          // Инициализируем недостающие контроллеры
-          for (var currency in _selectedCurrencies) {
-            _controllers.putIfAbsent(
-                currency, () => TextEditingController());
-          }
-
-          _isLoading = false;
-          _updateAllValues();
-        });
+        _processExchangeData(data);
       } else {
         _handleFetchError('Ошибка сервера: ${response.statusCode}');
       }
@@ -73,14 +46,59 @@ class _ConverterPageState extends State<ConverterPage> {
     }
   }
 
+  // Общий метод обработки данных JSON
+  void _processExchangeData(Map<String, dynamic> data) {
+    setState(() {
+      // Обрабатываем все валюты из JSON
+      Map<String, dynamic> valutes = data['Valute'];
+      valutes.forEach((key, value) {
+        double nominal = value['Nominal']?.toDouble() ?? 1.0;
+        double val = value['Value']?.toDouble() ?? 0.0;
+        _exchangeRates[key] = val / nominal;
+      });
+
+      // Обновляем список доступных валют
+      _availableCurrencies = ['RUB']..addAll(_exchangeRates.keys);
+      _availableCurrencies = _availableCurrencies.toSet().toList();
+
+      // Убедимся, что выбранные валюты существуют
+      for (int i = 0; i < _selectedCurrencies.length; i++) {
+        if (!_exchangeRates.containsKey(_selectedCurrencies[i])) {
+          _selectedCurrencies[i] = 'RUB';
+        }
+      }
+
+      // Инициализируем недостающие контроллеры
+      for (var currency in _selectedCurrencies) {
+        _controllers.putIfAbsent(
+            currency, () => TextEditingController());
+      }
+
+      _isLoading = false;
+      _updateAllValues();
+    });
+  }
+
+  // Загрузка данных из локального файла
+  Future<void> _loadLocalExchangeRates() async {
+    try {
+      final String dataString = await rootBundle.loadString('assets/daily_json_fallback.js');
+      final data = json.decode(dataString);
+      _processExchangeData(data);
+    } catch (e) {
+      _showError('Ошибка загрузки локальных данных: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
   void _handleFetchError(String message) {
     _attemptCount++;
 
     if (_attemptCount >= _maxAttempts) {
-      setState(() {
-        _isLoading = false;
-      });
-      _showError('$message\nПопытка $_attemptCount/$_maxAttempts');
+      _showError('$message\nНе удалось загрузить данные с сервера.\nИспользуются локальные данные.');
+      _loadLocalExchangeRates(); // Загружаем локальные данные
       return;
     }
 
@@ -111,9 +129,9 @@ class _ConverterPageState extends State<ConverterPage> {
     for (var currency in _selectedCurrencies) {
       if (currency == baseCurrency) continue;
 
-      double rate = _exchangeRates[currency] ?? 1.0;
-      double convertedValue = baseValue! *
-          (_exchangeRates[baseCurrency]! / rate);
+      double baseRate = _exchangeRates[baseCurrency] ?? 1.0;
+      double targetRate = _exchangeRates[currency] ?? 1.0;
+      double convertedValue = baseValue! * (baseRate / targetRate);
 
       _controllers[currency]!.text = convertedValue.toStringAsFixed(2);
     }
@@ -121,11 +139,6 @@ class _ConverterPageState extends State<ConverterPage> {
 
   void _onValueChanged(String currency, String value) {
     if (_isLoading) return;
-
-    // Обновляем только если значение изменилось
-    if (value != _controllers[currency]!.text) {
-      _controllers[currency]!.text = value;
-    }
 
     // Запускаем конвертацию
     _updateAllValues(currency);
@@ -159,7 +172,7 @@ class _ConverterPageState extends State<ConverterPage> {
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
-        duration: const Duration(seconds: 3),
+        duration: const Duration(seconds: 5),
       ),
     );
   }
