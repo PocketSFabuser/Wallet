@@ -11,94 +11,147 @@ class ConverterPage extends StatefulWidget {
 }
 
 class _ConverterPageState extends State<ConverterPage> {
-  final Map<String, TextEditingController> _controllers = {
-    'USD': TextEditingController(),
-    'BYN': TextEditingController(),
-    'RUB': TextEditingController(),
-  };
-
-  final Map<String, double> _exchangeRates = {
-    'USD': 0,
-    'BYN': 0,
-    'RUB': 1,
-  };
-
+  final Map<String, TextEditingController> _controllers = {};
+  final Map<String, double> _exchangeRates = {'RUB': 1.0};
+  List<String> _availableCurrencies = ['RUB'];
+  List<String> _selectedCurrencies = ['RUB', 'USD', 'BYN'];
   bool _isLoading = true;
-  String _lastEdited = 'RUB';
+  int _attemptCount = 0;
+  final int _maxAttempts = 10;
 
   @override
   void initState() {
     super.initState();
+    // Инициализация контроллеров для начальных валют
+    for (var currency in _selectedCurrencies) {
+      _controllers[currency] = TextEditingController();
+    }
     _fetchExchangeRates();
   }
 
   Future<void> _fetchExchangeRates() async {
     try {
       final response = await http
-          .get(Uri.parse('https://www.cbr-xml-daily.ru/daily_json.js'));
+          .get(Uri.parse('http://www.cbr-xml-daily.ru/daily_json.js'));
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
-
         setState(() {
-          // Получаем курс USD (за 1 USD в RUB)
-          _exchangeRates['USD'] = data['Valute']['USD']['Value']?.toDouble() ?? 0;
+          // Обрабатываем все валюты из JSON
+          Map<String, dynamic> valutes = data['Valute'];
+          valutes.forEach((key, value) {
+            double nominal = value['Nominal']?.toDouble() ?? 1.0;
+            double val = value['Value']?.toDouble() ?? 0.0;
+            _exchangeRates[key] = val / nominal;
+          });
 
-          // Получаем курс BYN (за 1 BYN в RUB)
-          _exchangeRates['BYN'] = data['Valute']['BYN']['Value']?.toDouble() ?? 0;
+          // Обновляем список доступных валют
+          _availableCurrencies = ['RUB']..addAll(_exchangeRates.keys);
+          _availableCurrencies = _availableCurrencies.toSet().toList();
+
+          // Убедимся, что выбранные валюты существуют
+          for (int i = 0; i < _selectedCurrencies.length; i++) {
+            if (!_exchangeRates.containsKey(_selectedCurrencies[i])) {
+              _selectedCurrencies[i] = 'RUB';
+            }
+          }
+
+          // Инициализируем недостающие контроллеры
+          for (var currency in _selectedCurrencies) {
+            _controllers.putIfAbsent(
+                currency, () => TextEditingController());
+          }
 
           _isLoading = false;
-          _updateAllValues(_controllers['RUB']!.text);
+          _updateAllValues();
         });
       } else {
-        _showError('Ошибка загрузки курсов: ${response.statusCode}');
+        _handleFetchError('Ошибка сервера: ${response.statusCode}');
       }
     } catch (e) {
-      _showError('Ошибка подключения: $e');
+      _handleFetchError('Ошибка подключения: $e');
     }
   }
 
-  void _updateAllValues(String value) {
-    if (value.isEmpty) {
-      _controllers['USD']!.text = '';
-      _controllers['BYN']!.text = '';
-      _controllers['RUB']!.text = '';
+  void _handleFetchError(String message) {
+    _attemptCount++;
+
+    if (_attemptCount >= _maxAttempts) {
+      setState(() {
+        _isLoading = false;
+      });
+      _showError('$message\nПопытка $_attemptCount/$_maxAttempts');
       return;
     }
 
-    final double rubValue = double.tryParse(value) ?? 0;
+    _showError('$message\nПопытка $_attemptCount/$_maxAttempts');
+    // Повторяем запрос через 2 секунды
+    Future.delayed(const Duration(seconds: 2), _fetchExchangeRates);
+  }
 
-    setState(() {
-      _controllers['RUB']!.text = rubValue.toStringAsFixed(2);
-      _controllers['USD']!.text = (rubValue / _exchangeRates['USD']!).toStringAsFixed(2);
-      _controllers['BYN']!.text = (rubValue / _exchangeRates['BYN']!).toStringAsFixed(2);
-    });
+  void _updateAllValues([String? baseCurrency]) {
+    // Если не указана базовая валюта, используем RUB по умолчанию
+    baseCurrency ??= 'RUB';
+    double? baseValue;
+
+    // Пытаемся получить значение базовой валюты
+    if (_controllers[baseCurrency]!.text.isNotEmpty) {
+      baseValue = double.tryParse(_controllers[baseCurrency]!.text);
+    }
+
+    // Если значение невалидно, сбрасываем все поля
+    if (baseValue == null) {
+      for (var currency in _selectedCurrencies) {
+        _controllers[currency]!.text = '';
+      }
+      return;
+    }
+
+    // Конвертируем значение во все валюты
+    for (var currency in _selectedCurrencies) {
+      if (currency == baseCurrency) continue;
+
+      double rate = _exchangeRates[currency] ?? 1.0;
+      double convertedValue = baseValue! *
+          (_exchangeRates[baseCurrency]! / rate);
+
+      _controllers[currency]!.text = convertedValue.toStringAsFixed(2);
+    }
   }
 
   void _onValueChanged(String currency, String value) {
     if (_isLoading) return;
 
-    _lastEdited = currency;
+    // Обновляем только если значение изменилось
+    if (value != _controllers[currency]!.text) {
+      _controllers[currency]!.text = value;
+    }
 
-    if (value.isEmpty) {
-      for (var controller in _controllers.values) {
-        controller.text = '';
+    // Запускаем конвертацию
+    _updateAllValues(currency);
+  }
+
+  void _onCurrencyChanged(int index, String? newCurrency) {
+    if (newCurrency == null || newCurrency == _selectedCurrencies[index]) return;
+
+    setState(() {
+      // Удаляем старый контроллер если валюта больше не используется
+      String oldCurrency = _selectedCurrencies[index];
+      _selectedCurrencies[index] = newCurrency;
+
+      bool isCurrencyStillUsed = _selectedCurrencies.contains(oldCurrency);
+      if (!isCurrencyStillUsed) {
+        _controllers[oldCurrency]?.dispose();
+        _controllers.remove(oldCurrency);
       }
-      return;
-    }
 
-    final double? inputValue = double.tryParse(value);
-    if (inputValue == null) return;
+      // Создаем новый контроллер при необходимости
+      _controllers.putIfAbsent(
+          newCurrency, () => TextEditingController());
 
-    double rubValue = 0;
-
-    if (currency == 'RUB') {
-      rubValue = inputValue;
-    } else {
-      rubValue = inputValue * _exchangeRates[currency]!;
-    }
-
-    _updateAllValues(rubValue.toString());
+      // Обновляем значения
+      _updateAllValues();
+    });
   }
 
   void _showError(String message) {
@@ -106,12 +159,9 @@ class _ConverterPageState extends State<ConverterPage> {
       SnackBar(
         content: Text(message),
         backgroundColor: Colors.red,
+        duration: const Duration(seconds: 3),
       ),
     );
-
-    setState(() {
-      _isLoading = false;
-    });
   }
 
   @override
@@ -138,9 +188,8 @@ class _ConverterPageState extends State<ConverterPage> {
         padding: const EdgeInsets.all(16.0),
         child: Column(
           children: [
-            _buildCurrencyField('RUB', '₽'),
-            _buildCurrencyField('USD', '\$'),
-            _buildCurrencyField('BYN', 'Br'),
+            for (int i = 0; i < _selectedCurrencies.length; i++)
+              _buildCurrencyRow(i),
             const SizedBox(height: 20),
             Text(
               'Актуальный курс валют по данным ЦБ РФ',
@@ -152,22 +201,66 @@ class _ConverterPageState extends State<ConverterPage> {
     );
   }
 
-  Widget _buildCurrencyField(String currency, String symbol) {
+  Widget _buildCurrencyRow(int index) {
+    final currency = _selectedCurrencies[index];
+    final symbol = _getCurrencySymbol(currency);
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10.0),
-      child: TextField(
-        controller: _controllers[currency],
-        keyboardType: TextInputType.number,
-        decoration: InputDecoration(
-          labelText: currency,
-          suffixText: symbol,
-          border: const OutlineInputBorder(),
-          filled: true,
-          fillColor: const Color(0xFF2A2A2A),
-        ),
-        style: const TextStyle(fontSize: 18),
-        onChanged: (value) => _onValueChanged(currency, value),
+      child: Row(
+        children: [
+          Expanded(
+            flex: 2,
+            child: DropdownButton<String>(
+              value: currency,
+              dropdownColor: const Color(0xFF2A2A2A),
+              items: _availableCurrencies
+                  .map((curr) => DropdownMenuItem(
+                value: curr,
+                child: Text(
+                  curr,
+                  style: const TextStyle(color: Colors.white),
+                ),
+              ))
+                  .toList(),
+              onChanged: (newValue) => _onCurrencyChanged(index, newValue),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            flex: 3,
+            child: TextField(
+              controller: _controllers[currency],
+              keyboardType: TextInputType.number,
+              decoration: InputDecoration(
+                suffixText: symbol,
+                border: const OutlineInputBorder(),
+                filled: true,
+                fillColor: const Color(0xFF2A2A2A),
+              ),
+              style: const TextStyle(fontSize: 18, color: Colors.white),
+              onChanged: (value) => _onValueChanged(currency, value),
+            ),
+          ),
+        ],
       ),
     );
+  }
+
+  String _getCurrencySymbol(String currency) {
+    switch (currency) {
+      case 'USD':
+        return '\$';
+      case 'BYN':
+        return 'Br';
+      case 'RUB':
+        return '₽';
+      case 'EUR':
+        return '€';
+      case 'CNY':
+        return '¥';
+      default:
+        return '';
+    }
   }
 }
