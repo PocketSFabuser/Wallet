@@ -1,7 +1,7 @@
 {
     "Date": "2025-06-07T11:30:00+03:00",
     "PreviousDate": "2025-06-06T11:30:00+03:00",
-    "PreviousURL": "www.cbr-xml-daily.ru\/archive\/2025\/06\/06\/daily_json.js",
+    "PreviousURL": "www.cbr-xml-daily.ru/archive/2025/06/06/daily_json.js",
     "Timestamp": "2025-06-07T17:00:00+03:00",
     "Valute": {
         "AUD": {

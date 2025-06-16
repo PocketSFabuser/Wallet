@@ -205,7 +205,7 @@ class _ConverterPageState extends State<ConverterPage> {
               _buildCurrencyRow(i),
             const SizedBox(height: 20),
             Text(
-              'Актуальный курс валют по данным ЦБ РФ',
+              'Курс валют по данным ЦБ РФ',
               style: TextStyle(color: Colors.grey[400]),
             ),
           ],
